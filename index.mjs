@@ -6,6 +6,10 @@ const BUCKET_NAME = "aa-ai-raw-documents";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+let bigBookData = null; // Global variable for caching
+let lastFetchTime = 0;
+const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // Cache for 1 day 
+
 export const handler = async (event) => {
     console.log("Incoming request:", JSON.stringify(event));
 
@@ -20,13 +24,20 @@ export const handler = async (event) => {
             };
         }
 
+	const now = Date.now();
+	if(!bigBookData || now - lastFetchTime > CACHE_DURATION_MS) {
+	  console.log('fetching books from S3...');
+          bigBookData = await fetchBooksFromS3();
+          lastFetchTime = now;
+	}
+
         // Fetch data from S3 (Big Book + 12n12)
-        const bigBookData = await fetchBooksFromS3();
         const relevantPassages = findRelevantPassages(userMessage, bigBookData);
 
         // Call OpenAI API
         const aiPrompt = `Here is the user's question: "${userMessage}". Based on the Big Book and 12 Steps & 12 Traditions, respond using these relevant excerpts: \n\n${relevantPassages}`;
 
+	const startOpenAiInMillis = new Date().getTime();
         const response = await openai.chat.completions.create({
             model: "gpt-4o",
             messages: [
@@ -35,6 +46,7 @@ export const handler = async (event) => {
             ],
             temperature: 0.7,
         });
+	console.log("OpenAI response in " + (new Date().getTime() - startOpenAiInMillis));
 
         return {
             statusCode: 200,
